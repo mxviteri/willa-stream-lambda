@@ -1,0 +1,24 @@
+{
+  "name": "willa-stream-lambda",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs",
+  "scripts": {
+    "test": "node test/test.mjs",
+    "build": "echo 'No build step required for .mjs files'",
+    "package": "zip -r stream-lambda-deployment.zip src/ package.json index.mjs node_modules/",
+    "deploy-s3": "aws s3 cp stream-lambda-deployment.zip s3://365339898470-us-east-1-lambda-code/stream-lambda-deployment.zip --profile personal",
+    "deploy-lambda": "aws lambda update-function-code --function-name MetadataSearchStack-DdbToAossFn1D7B7EB5-pRDVkiNypoXK --s3-bucket 365339898470-us-east-1-lambda-code --s3-key stream-lambda-deployment.zip --profile personal",
+    "deploy": "npm run package && npm run deploy-s3 && npm run deploy-lambda"
+  },
+  "dependencies": {
+    "@aws-crypto/sha256-js": "^5.0.0",
+    "@aws-sdk/credential-provider-node": "^3.609.0",
+    "@aws-sdk/signature-v4": "^3.370.0",
+    "@aws-sdk/util-dynamodb": "^3.609.0",
+    "@smithy/node-http-handler": "^3.1.6",
+    "@smithy/protocol-http": "^4.1.0"
+  }
+}
+

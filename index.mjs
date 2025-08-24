@@ -40,6 +40,12 @@ export async function handler(event) {
     if (!img) continue;
     const doc = unmarshall(img);
 
+    // Only index entities of type "Save"; ignore all others in our single-table design
+    if (doc.entityType !== 'Save') {
+      debugLog('skipping non-save entity', { id, entityType: doc.entityType });
+      continue;
+    }
+
     const version = Number(doc.updatedAt || doc.timestamp || 0) || Number((rec.dynamodb || {}).ApproximateCreationDateTime || 0) * 1000 || Date.now();
     ops.push(JSON.stringify({ index: { _index: indexName, _id: id, version, version_type: 'external_gte' } }));
     ops.push(JSON.stringify(doc));

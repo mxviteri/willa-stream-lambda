@@ -23,9 +23,9 @@ function debugLog(message, meta) {
 const signer = new SignatureV4({ service: 'aoss', region, credentials: defaultProvider(), sha256: Sha256 });
 const http = new NodeHttpHandler();
 
+
 export async function handler(event) {
   console.log('ddb-to-aoss invoked', { records: (event.Records || []).length, indexName });
-  await ensureIndexExists();
   const ops = [];
   for (const rec of event.Records || []) {
     const keys = (rec.dynamodb && rec.dynamodb.Keys) || {};
@@ -45,6 +45,9 @@ export async function handler(event) {
       debugLog('skipping non-save entity', { id, entityType: doc.entityType });
       continue;
     }
+
+    // Normalize fields that must be strings to avoid accidental BOOL mapping
+    normalizeForIndex(doc);
 
     const version = Number(doc.updatedAt || doc.timestamp || 0) || Number((rec.dynamodb || {}).ApproximateCreationDateTime || 0) * 1000 || Date.now();
     ops.push(JSON.stringify({ index: { _index: indexName, _id: id, version, version_type: 'external_gte' } }));
@@ -91,19 +94,7 @@ export async function handler(event) {
   }
 }
 
-async function ensureIndexExists() {
-  const host = endpoint.replace(/^https?:\/\//, '');
-  const req = new HttpRequest({ method: 'PUT', protocol: 'https:', hostname: host, path: `/${indexName}`, headers: { host, 'content-type': 'application/json' }, body: JSON.stringify({}) });
-  const signed = await signer.sign({ method: req.method, protocol: req.protocol, hostname: req.hostname, path: req.path, headers: { ...req.headers }, query: req.query, body: req.body });
-  const signedReq = new HttpRequest({ ...req, headers: signed.headers });
-  try {
-    debugLog('ensuring index exists', { indexName });
-    const { response } = await http.handle(signedReq);
-    if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) return;
-  } catch (_) {
-    debugLog('ensure index call resulted in non-2xx (likely exists already)', {});
-  }
-}
+// Index creation is managed out-of-band; no ensure step in the stream
 
 function unmarshall(image) {
   const out = {};
@@ -132,6 +123,42 @@ function unmarshallAny(v) {
     case 'M': return unmarshall(val);
     case 'L': return (val || []).map(unmarshallAny);
     default: return val;
+  }
+}
+
+// Ensure specific fields are indexed with the correct types regardless of DDB source types
+function normalizeForIndex(doc) {
+  // Comments must be text
+  if (Object.prototype.hasOwnProperty.call(doc, 'comments')) {
+    const raw = doc.comments;
+    // If not a user-provided string, drop it (do NOT index "true"/"false")
+    if (raw == null) {
+      delete doc.comments;
+    } else if (typeof raw !== 'string') {
+      // was boolean/number/etc → treat as no comment
+      delete doc.comments;
+    } else {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'true' || trimmed.toLowerCase() === 'false') {
+        delete doc.comments;
+      } else {
+        doc.comments = trimmed;
+      }
+    }
+  }
+  // thirdPartyImage should be a URL string, never boolean
+  if (Object.prototype.hasOwnProperty.call(doc, 'thirdPartyImage')) {
+    const raw = doc.thirdPartyImage;
+    if (typeof raw !== 'string') { delete doc.thirdPartyImage; }
+    else {
+      const val = raw.trim();
+      const isUrl = /^https?:\/\//i.test(val);
+      if (!val || val.toLowerCase() === 'true' || val.toLowerCase() === 'false' || !isUrl) {
+        delete doc.thirdPartyImage;
+      } else {
+        doc.thirdPartyImage = val;
+      }
+    }
   }
 }
 

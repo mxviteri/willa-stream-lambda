@@ -30,6 +30,7 @@ const credentials = profile ? fromIni({ profile }) : defaultProvider();
 const signer = new SignatureV4({ service: 'aoss', region, credentials, sha256: Sha256 });
 const http = new NodeHttpHandler();
 
+// DONT USE THIS, IT MESSES UP THE SEARCH FUNCTIONALITY
 const indexMappings = {
   settings: { index: { number_of_shards: 1 } },
   mappings: {
@@ -75,7 +76,7 @@ async function signedHandle(req) {
 
 async function create() {
   const host = endpoint.replace(/^https?:\/\//, '');
-  const put = new HttpRequest({ method: 'PUT', protocol: 'https:', hostname: host, path: `/${indexName}`, headers: { host, 'content-type': 'application/json' }, body: JSON.stringify(indexMappings) });
+  const put = new HttpRequest({ method: 'PUT', protocol: 'https:', hostname: host, path: `/${indexName}`, headers: { host, 'content-type': 'application/json' } });
   const { status, text } = await signedHandle(put);
   if (status < 200 || status >= 300) throw new Error(`Create failed: ${status} ${text?.slice(0,500)}`);
   console.log('Index created', { indexName, status });

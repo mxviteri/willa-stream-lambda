@@ -7,6 +7,7 @@ import { HttpRequest } from '@smithy/protocol-http';
 
 const endpoint = process.env.AOSS_ENDPOINT;
 const indexName = process.env.AOSS_INDEX || 'saves';
+const tagIndexName = process.env.AOSS_TAG_INDEX || 'discovertags';
 const region = process.env.AWS_REGION;
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
 
@@ -40,9 +41,14 @@ export async function handler(event) {
     if (!img) continue;
     const doc = unmarshall(img);
 
-    // Only index entities of type "Save"; ignore all others in our single-table design
-    if (doc.entityType !== 'Save') {
-      debugLog('skipping non-save entity', { id, entityType: doc.entityType });
+    // Only index entities we care about: Save and DiscoverTag
+    let targetIndex = null;
+    if (doc.entityType === 'Save') {
+      targetIndex = indexName;
+    } else if (doc.entityType === 'DiscoverTag') {
+      targetIndex = tagIndexName;
+    } else {
+      debugLog('skipping entity', { id, entityType: doc.entityType });
       continue;
     }
 
@@ -50,7 +56,7 @@ export async function handler(event) {
     normalizeForIndex(doc);
 
     const version = Number(doc.updatedAt || doc.timestamp || 0) || Number((rec.dynamodb || {}).ApproximateCreationDateTime || 0) * 1000 || Date.now();
-    ops.push(JSON.stringify({ index: { _index: indexName, _id: id, version, version_type: 'external_gte' } }));
+    ops.push(JSON.stringify({ index: { _index: targetIndex, _id: id, version, version_type: 'external_gte' } }));
     ops.push(JSON.stringify(doc));
   }
   if (ops.length === 0) {
@@ -65,8 +71,8 @@ export async function handler(event) {
   while (true) {
     attempt++;
     const host = endpoint.replace(/^https?:\/\//, '');
-    // Target the specific index for bulk operations
-    const req = new HttpRequest({ method: 'POST', protocol: 'https:', hostname: host, path: `/${indexName}/_bulk`, headers: { host, 'content-type': 'application/json' }, body });
+    // Use root bulk path so meta lines can pick per-doc index
+    const req = new HttpRequest({ method: 'POST', protocol: 'https:', hostname: host, path: `/_bulk`, headers: { host, 'content-type': 'application/json' }, body });
     const signed = await signer.sign({ method: req.method, protocol: req.protocol, hostname: req.hostname, path: req.path, headers: { ...req.headers }, query: req.query, body: req.body });
     const signedReq = new HttpRequest({ ...req, headers: signed.headers });
     debugLog('sending bulk request', { attempt, ops: ops.length });

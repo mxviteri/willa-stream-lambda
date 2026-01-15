@@ -8,8 +8,8 @@
     "test": "node test/test.mjs",
     "build": "echo 'No build step required for .mjs files'",
     "package": "zip -r stream-lambda-deployment.zip src/ package.json index.mjs node_modules/",
-    "deploy-s3": "aws s3 cp stream-lambda-deployment.zip s3://365339898470-us-east-1-lambda-code/stream-lambda-deployment.zip --profile personal",
-    "deploy-lambda": "aws lambda update-function-code --function-name MetadataSearchStack-DdbToAossFn1D7B7EB5-pRDVkiNypoXK --s3-bucket 365339898470-us-east-1-lambda-code --s3-key stream-lambda-deployment.zip --profile personal",
+    "deploy-s3": "aws s3 cp stream-lambda-deployment.zip s3://willa-lambda-code-567736086349/stream-lambda-deployment.zip --profile willa-prod",
+    "deploy-lambda": "aws lambda update-function-code --function-name MetadataSearchStack-DdbToAossFn1D7B7EB5-J2lIapkP13Ht --s3-bucket willa-lambda-code-567736086349 --s3-key stream-lambda-deployment.zip --profile willa-prod",
     "deploy": "npm run package && npm run deploy-s3 && npm run deploy-lambda",
     "index:create": "node scripts/index-tools.mjs create --profile personal",
     "index:delete": "node scripts/index-tools.mjs delete --profile personal",
@@ -25,4 +25,3 @@
     "@smithy/protocol-http": "^4.1.0"
   }
 }
-

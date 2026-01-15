@@ -4,15 +4,12 @@ import { Sha256 } from '@aws-crypto/sha256-js';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { HttpRequest } from '@smithy/protocol-http';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 
 const endpoint = process.env.AOSS_ENDPOINT;
 const indexName = process.env.AOSS_INDEX || 'saves';
 const tagIndexName = process.env.AOSS_TAG_INDEX || 'discovertags';
 const region = process.env.AWS_REGION;
 const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const GLOBAL_SAVES_TABLE_NAME = process.env.GLOBAL_SAVES_TABLE_NAME || 'GlobalSaves';
 
 function debugLog(message, meta) {
   if (LOG_LEVEL === 'debug') {
@@ -27,18 +24,10 @@ function debugLog(message, meta) {
 const signer = new SignatureV4({ service: 'aoss', region, credentials: defaultProvider(), sha256: Sha256 });
 const http = new NodeHttpHandler();
 
-// DynamoDB client for updating status after indexing
-const ddbClient = new DynamoDBClient({ region });
-const ddbDocClient = DynamoDBDocumentClient.from(ddbClient, {
-  marshallOptions: { removeUndefinedValues: true }
-});
-
 
 export async function handler(event) {
   console.log('ddb-to-aoss invoked', { records: (event.Records || []).length, indexName });
   const ops = [];
-  const itemsToUpdate = []; // Track items with status='PROCESSING' that need status update after indexing
-
   for (const rec of event.Records || []) {
     const keys = (rec.dynamodb && rec.dynamodb.Keys) || {};
     const id = Object.values(keys).map((v) => Object.values(v)[0]).join('#') || 'unknown';
@@ -51,30 +40,6 @@ export async function handler(event) {
     const img = rec.dynamodb && rec.dynamodb.NewImage;
     if (!img) continue;
     const doc = unmarshall(img);
-
-    // Check indexable for Save entities - skip if not indexable
-    if (doc.entityType === 'Save') {
-      const indexable = doc.indexable ?? true;
-      if (!indexable) {
-        debugLog('skipping non-indexable Save', { id, saveId: doc.id });
-        continue;
-      }
-    }
-
-    // Track if this Save item was PROCESSING and needs status update after indexing
-    if (doc.entityType === 'Save' && doc.status === 'PROCESSING') {
-      // Extract keys from DynamoDB stream format (they're in {S: "value"} format)
-      const pk = keys.pk?.S || (keys.pk && typeof keys.pk === 'string' ? keys.pk : null);
-      const sk = keys.sk?.S || (keys.sk && typeof keys.sk === 'string' ? keys.sk : null);
-      if (pk && sk) {
-        itemsToUpdate.push({
-          keys: { pk, sk },
-          saveId: doc.id,
-          username: doc.username
-        });
-        debugLog('tracking PROCESSING item for status update', { saveId: doc.id });
-      }
-    }
 
     // Only index entities we care about: Save and DiscoverTag
     let targetIndex = null;
@@ -120,12 +85,6 @@ export async function handler(event) {
       const parsed = JSON.parse(respBody);
       if (!parsed.errors) {
         console.log('bulk success', { items: (parsed.items || []).length });
-        
-        // Update status for items that were PROCESSING (only if indexing succeeded)
-        if (itemsToUpdate.length > 0) {
-          await updateIndexedStatus(itemsToUpdate);
-        }
-        
         return { status: 'ok', items: (parsed.items || []).length };
       }
       console.error('bulk partial errors', { body: respBody.substring(0, 500) });
@@ -142,56 +101,6 @@ export async function handler(event) {
 }
 
 // Index creation is managed out-of-band; no ensure step in the stream
-
-/**
- * Update status for items that were PROCESSING after successful indexing.
- * Uses conditional update to prevent loops - only updates if status is still PROCESSING.
- * @param {Array<{keys: Object, saveId: string, username?: string}>} itemsToUpdate
- */
-async function updateIndexedStatus(itemsToUpdate) {
-  if (itemsToUpdate.length === 0) return;
-  
-  console.log('updating status for indexed items', { count: itemsToUpdate.length });
-  
-  const updatePromises = itemsToUpdate.map(async ({ keys, saveId, username }) => {
-    try {
-      await ddbDocClient.send(new UpdateCommand({
-        TableName: GLOBAL_SAVES_TABLE_NAME,
-        Key: keys,
-        UpdateExpression: 'REMOVE #status SET updatedAt = :now',
-        ExpressionAttributeNames: { '#status': 'status' },
-        ExpressionAttributeValues: { 
-          ':now': new Date().toISOString(),
-          ':processing': 'PROCESSING'
-        },
-        ConditionExpression: '#status = :processing',
-      }));
-      debugLog('updated status after indexing', { saveId, username });
-    } catch (error) {
-      // Status may have changed (not PROCESSING anymore) - that's ok, skip it
-      // This prevents loops if the item was updated by another process
-      if (error.name === 'ConditionalCheckFailedException') {
-        debugLog('status already changed, skipping update', { saveId, username });
-      } else {
-        // Log other errors but don't fail the lambda - indexing succeeded
-        console.error('failed to update status after indexing', { 
-          saveId, 
-          username, 
-          error: error.message,
-          errorName: error.name 
-        });
-      }
-    }
-  });
-  
-  // Process with limited concurrency (50 at a time) to avoid overwhelming DDB
-  const concurrency = 50;
-  for (let i = 0; i < updatePromises.length; i += concurrency) {
-    await Promise.all(updatePromises.slice(i, i + concurrency));
-  }
-  
-  console.log('completed status updates', { count: itemsToUpdate.length });
-}
 
 function unmarshall(image) {
   const out = {};

@@ -4,7 +4,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-export class OpenAI {
+export class OpenAIUtil {
     static async generateEnrichments({ title, description, url }) {
         const inputText = `
             Title: ${title}
@@ -12,19 +12,20 @@ export class OpenAI {
             URL: ${url}
         
             Return a JSON object with a single field "enrichments": a list of semantic categories the content belongs to that will be used for search enhancements.
+            There should be a maximum of 5 enrichments strings. Exclude overly generic categories like "Social Media".
             If nothing of value can be inferred, return an empty array.
             No explanations.
         `;
       
         try {
             const response = await client.responses.create({
-                model: "gpt-4.1-mini",   // perfect for this task, cheap + accurate
+                model: "gpt-4o-mini",
                 input: inputText,
-                response_format: {
-                    type: "json_schema",
-                    json_schema: {
-                        name: "enrichment_schema",
+                text: {
+                    format: {
+                        type: "json_schema",
                         strict: true,
+                        name: "enrichment_schema",
                         schema: {
                             type: "object",
                             properties: {
@@ -34,12 +35,15 @@ export class OpenAI {
                                 }
                             },
                             required: ["enrichments"],
-                        },
-                    },
-                },
+                            additionalProperties: false
+                        }
+                    }
+                }
             });
-          
-            return response.output[0].enrichments;  // → ["restaurant", "steakhouse", "food"]
+              
+            console.log('OpenAI response:', response);
+            const parsed = JSON.parse(response?.output_text || "{}");
+            return parsed.enrichments || []; // → ["restaurant", "steakhouse", "food"]
         } catch (error) {
             console.error('Error generating enrichments:', error);
             return [];

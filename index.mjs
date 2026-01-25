@@ -4,6 +4,7 @@ import { Sha256 } from '@aws-crypto/sha256-js';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { HttpRequest } from '@smithy/protocol-http';
+import { OpenAIUtil } from './src/utils/openai.mjs';
 
 const endpoint = process.env.AOSS_ENDPOINT;
 const indexName = process.env.AOSS_INDEX || 'saves';
@@ -54,6 +55,15 @@ export async function handler(event) {
 
     // Normalize fields that must be strings to avoid accidental BOOL mapping
     normalizeForIndex(doc);
+
+    // Generate enrichments for saves
+    if (doc.entityType === 'Save') {
+      doc.enrichments = await OpenAIUtil.generateEnrichments({
+        title: doc.title,
+        description: doc.description,
+        url: doc.url,
+      });
+    }
 
     const version = Number(doc.updatedAt || doc.timestamp || 0) || Number((rec.dynamodb || {}).ApproximateCreationDateTime || 0) * 1000 || Date.now();
     ops.push(JSON.stringify({ index: { _index: targetIndex, _id: id, version, version_type: 'external_gte' } }));

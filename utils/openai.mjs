@@ -12,6 +12,7 @@ export class OpenAI {
             URL: ${url}
         
             Return a JSON object with a single field "enrichments": a list of semantic categories the content belongs to that will be used for search enhancements.
+            If nothing of value can be inferred, return an empty array.
             No explanations.
         `;
       

@@ -4,7 +4,16 @@ import { Sha256 } from '@aws-crypto/sha256-js';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { HttpRequest } from '@smithy/protocol-http';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { OpenAIUtil } from './src/utils/openai.mjs';
+
+const GLOBAL_SAVES_TABLE_NAME = 'GlobalSaves';
+const ddbClient = new DynamoDBClient({});
+const ddbDocClient = DynamoDBDocumentClient.from(ddbClient, {
+  marshallOptions: { removeUndefinedValues: true },
+  unmarshallOptions: { wrapNumbers: false },
+});
 
 const endpoint = process.env.AOSS_ENDPOINT;
 const indexName = process.env.AOSS_INDEX || 'saves';
@@ -56,13 +65,48 @@ export async function handler(event) {
     // Normalize fields that must be strings to avoid accidental BOOL mapping
     normalizeForIndex(doc);
 
-    // Generate enrichments for saves
     if (doc.entityType === 'Save') {
-      doc.enrichments = await OpenAIUtil.generateEnrichments({
+      const needsBrokenTag = !Object.prototype.hasOwnProperty.call(doc, 'isBroken');
+      const enrichmentsPromise = OpenAIUtil.generateEnrichments({
         title: doc.title,
         description: doc.description,
         url: doc.url,
       });
+      const brokenPromise = needsBrokenTag
+        ? OpenAIUtil.detectBrokenSave({
+            title: doc.title,
+            description: doc.description,
+            url: doc.url,
+            image: doc.image || doc.thirdPartyImage || null,
+          }).catch((err) => {
+            console.error('detectBrokenSave error', err);
+            return { isBroken: true };
+          })
+        : Promise.resolve(null);
+
+      const [enrichments, brokenResult] = await Promise.all([enrichmentsPromise, brokenPromise]);
+      doc.enrichments = enrichments ?? [];
+
+      if (needsBrokenTag && brokenResult !== null) {
+        const isBroken = brokenResult.isBroken === true;
+        doc.isBroken = isBroken;
+        try {
+          const keyObj = unmarshall(rec.dynamodb.Keys || {});
+          await ddbDocClient.send(new UpdateCommand({
+            TableName: GLOBAL_SAVES_TABLE_NAME,
+            Key: keyObj,
+            UpdateExpression: 'SET isBroken = :b',
+            ConditionExpression: 'attribute_not_exists(isBroken)',
+            ExpressionAttributeValues: { ':b': isBroken },
+          }));
+        } catch (updateErr) {
+          if (updateErr?.name === 'ConditionalCheckFailedException') {
+            debugLog('isBroken already set, skip update', { id });
+          } else {
+            console.error('UpdateItem isBroken failed', updateErr);
+          }
+        }
+      }
     }
 
     const version = Number(doc.updatedAt || doc.timestamp || 0) || Number((rec.dynamodb || {}).ApproximateCreationDateTime || 0) * 1000 || Date.now();

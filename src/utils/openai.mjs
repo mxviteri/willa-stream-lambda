@@ -73,6 +73,7 @@ export class OpenAIUtil {
 
                 KNOWN PLATFORM FALLBACKS (these are default pages shown when content is blocked and should be marked as broken):
                 - Facebook: title "Facebook" with description "Explore the things you love" or "Log in or sign up"
+                - Instagram: title "Instagram" with description "Create an account or log in to Instagram - Share what you're into with the people who get you"
 
                 No explanations.
             `.trim();

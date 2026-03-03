@@ -70,6 +70,10 @@ export class OpenAIUtil {
                 Determine if this save is "broken": e.g. missing or invalid URL, no usable title, no image when one would be expected, or content that cannot be meaningfully used for search or display.
                 That could include things like login blockers or paywalls, or a title/description that indicates we were rate-limited, etc. These are just examples. 
                 Return a JSON object with a single boolean field "isBroken": true if broken, false otherwise.
+
+                KNOWN PLATFORM FALLBACKS (these are default pages shown when content is blocked and should be marked as broken):
+                - Facebook: title "Facebook" with description "Explore the things you love" or "Log in or sign up"
+
                 No explanations.
             `.trim();
             const response = await client.responses.create({

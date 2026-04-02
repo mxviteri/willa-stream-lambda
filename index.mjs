@@ -206,6 +206,22 @@ function normalizeForIndex(doc) {
       }
     }
   }
+  // Publisher must be a meaningful string, never boolean
+  if (Object.prototype.hasOwnProperty.call(doc, 'publisher')) {
+    const raw = doc.publisher;
+    if (raw == null) {
+      delete doc.publisher;
+    } else if (typeof raw !== 'string') {
+      delete doc.publisher;
+    } else {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'true' || trimmed.toLowerCase() === 'false') {
+        delete doc.publisher;
+      } else {
+        doc.publisher = trimmed;
+      }
+    }
+  }
   // thirdPartyImage should be a URL string, never boolean
   if (Object.prototype.hasOwnProperty.call(doc, 'thirdPartyImage')) {
     const raw = doc.thirdPartyImage;
